@@ -5,16 +5,16 @@ using Base.Test
 X = rand(1000, 2000)
 
 
-function brbm_smoke_test()
-    model = BernoulliRBM(1000, 500)
+function rbm_smoke_test()
+    model = BaseRBM(Units(1000), Units(500))
     fit(model, X)
 end
 
-function grbm_smoke_test()
-    model = GRBM(1000, 500)
+function gaussian_rbm_smoke_test()
+    model = BaseRBM(Units(1000, :gaussian), Units(500))
     fit(model, X)
 end
 
 
-brbm_smoke_test()
-grbm_smoke_test()
+rbm_smoke_test()
+gaussian_rbm_smoke_test()

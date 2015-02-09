@@ -1,8 +1,9 @@
 
 module Boltzmann
 
-export BernoulliRBM,
-       GRBM,
+export RBM,
+       Units,
+       BaseRBM,
        DBN,
        fit,
        transform,

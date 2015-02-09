@@ -2,51 +2,59 @@
 using Distributions
 using Base.LinAlg.BLAS
 
+import Base.length
+
+
 abstract RBM
 
 typealias Mat{T} AbstractArray{T, 2}
 typealias Vec{T} AbstractArray{T, 1}
 
-type BernoulliRBM <: RBM
-    W::Matrix{Float64}
-    vbias::Vector{Float64}
-    hbias::Vector{Float64}
-    dW_prev::Matrix{Float64}
-    persistent_chain::Matrix{Float64}
-    momentum::Float64
-    function BernoulliRBM(n_vis::Int, n_hid::Int; sigma=0.001, momentum=0.9)
-        new(rand(Normal(0, sigma), (n_hid, n_vis)),
-            zeros(n_vis), zeros(n_hid),
-            zeros(n_hid, n_vis),
-            Array(Float64, 0, 0),
-            momentum)
+const UNIT_CLASSES = [:bernoulli, :gaussian]
+
+type Units
+    bias::Vector{Float64}
+    class::Symbol
+
+    function Units(num::Int, class::Symbol=:bernoulli)
+        #@assert class in UNIT_CLASSES
+        new(zeros(num), class)
     end
-    function Base.show(io::IO, rbm::BernoulliRBM)
-        n_vis = size(rbm.vbias, 1)
-        n_hid = size(rbm.hbias, 1)
-        print(io, "BernoulliRBM($n_vis, $n_hid)")
+
+    function Base.show(io::IO, units::Units)
+        num = size(units)
+        print(io, "Units(class=$(units.class), size=$num)")
     end
 end
 
+length(units::Units) = length(units.bias)
+insert!(units::Units, index::Int, item::Any) = insert!(units.bias, index, item)
+deleteat!(units::Units, index::Int) = deleteat!(units.bias, index)
 
-type GRBM <: RBM
-    W::Mat{Float64}
-    vbias::Vec{Float64}
-    hbias::Vec{Float64}
-    dW_prev::Mat{Float64}
+
+type BaseRBM <: RBM
+    W::Matrix{Float64}
+    visible::Units
+    hidden::Units
+    dW_prev::Matrix{Float64}
     persistent_chain::Matrix{Float64}
     momentum::Float64
-    function GRBM(n_vis::Int, n_hid::Int; sigma=0.001, momentum=0.9)
+
+    function BaseRBM(visible::Units, hidden::Units; sigma=0.001, momentum=0.9)
+        n_hid = length(hidden)
+        n_vis = length(visible)
+
         new(rand(Normal(0, sigma), (n_hid, n_vis)),
-            zeros(n_vis), zeros(n_hid),
+            visible, hidden,
             zeros(n_hid, n_vis),
             Array(Float64, 0, 0),
             momentum)
     end
-    function Base.show(io::IO, rbm::GRBM)
-        n_vis = size(rbm.vbias, 1)
-        n_hid = size(rbm.hbias, 1)
-        print(io, "GRBM($n_vis, $n_hid)")
+
+    function Base.show(io::IO, rbm::BaseRBM)
+        n_vis = length(rbm.visible)
+        n_hid = length(rbm.hidden)
+        print(io, "BaseRBM($n_vis, $n_hid, momentum=$(rbm.momentum))")
     end
 end
 
@@ -57,7 +65,7 @@ end
 
 
 function mean_hiddens(rbm::RBM, vis::Mat{Float64})
-    p = rbm.W * vis .+ rbm.hbias
+    p = rbm.W * vis .+ rbm.hidden.bias
     return logistic(p)
 end
 
@@ -68,21 +76,20 @@ function sample_hiddens(rbm::RBM, vis::Mat{Float64})
 end
 
 
-function sample_visibles(rbm::BernoulliRBM, hid::Mat{Float64})
-    p = rbm.W' * hid .+ rbm.vbias
-    p = logistic(p)
-    return float(rand(size(p)) .< p)
-end
-
-
-function sample_visibles(rbm::GRBM, hid::Mat{Float64})
-    mu = logistic(rbm.W' * hid .+ rbm.vbias)
-    sigma2 = 0.01                   # using fixed standard diviation
-    samples = zeros(size(mu))
-    for j=1:size(mu, 2), i=1:size(mu, 1)
-        samples[i, j] = rand(Normal(mu[i, j], sigma2))
+function sample_visibles(rbm::RBM, hid::Mat{Float64})
+    if rbm.visible.class == :bernoulli
+        p = rbm.W' * hid .+ rbm.visible.bias
+        p = logistic(p)
+        return float(rand(size(p)) .< p)
+    elseif rbm.visible.class == :gaussian
+        mu = logistic(rbm.W' * hid .+ rbm.visible.bias)
+        sigma2 = 0.01                   # using fixed standard diviation
+        samples = zeros(size(mu))
+        for j=1:size(mu, 2), i=1:size(mu, 1)
+            samples[i, j] = rand(Normal(mu[i, j], sigma2))
+        end
+        return samples
     end
-    return samples
 end
 
 
@@ -100,8 +107,8 @@ end
 
 
 function free_energy(rbm::RBM, vis::Mat{Float64})
-    vb = sum(vis .* rbm.vbias, 1)
-    Wx_b_log = sum(log(1 + exp(rbm.W * vis .+ rbm.hbias)), 1)
+    vb = sum(vis .* rbm.visible.bias, 1)
+    Wx_b_log = sum(log(1 + exp(rbm.W * vis .+ rbm.hidden.bias)), 1)
     return - vb - Wx_b_log
 end
 
@@ -125,7 +132,7 @@ function score_samples(rbm::RBM, vis::Mat{Float64}; sample_size=10000)
 end
 
 
-function update_weights!(rbm, h_pos, v_pos, h_neg, v_neg, lr, buf)
+function update_weights!(rbm::RBM, h_pos, v_pos, h_neg, v_neg, lr, buf)
     dW = buf
     # dW = (h_pos * v_pos') - (h_neg * v_neg')
     gemm!('N', 'T', 1.0, h_neg, v_neg, 0.0, dW)
@@ -166,8 +173,8 @@ function fit_batch!(rbm::RBM, vis::Mat{Float64};
     v_pos, h_pos, v_neg, h_neg = sampler(rbm, vis, n_gibbs)
     lr = lr / size(v_pos, 1)
     update_weights!(rbm, h_pos, v_pos, h_neg, v_neg, lr, buf)
-    rbm.hbias += vec(lr * (sum(h_pos, 2) - sum(h_neg, 2)))
-    rbm.vbias += vec(lr * (sum(v_pos, 2) - sum(v_neg, 2)))
+    rbm.hidden.bias += vec(lr * (sum(h_pos, 2) - sum(h_neg, 2)))
+    rbm.visible.bias += vec(lr * (sum(v_pos, 2) - sum(v_neg, 2)))
     return rbm
 end
 
