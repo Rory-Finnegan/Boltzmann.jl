@@ -54,6 +54,9 @@ function fit(dbn::DBN, X::Mat{Float64}; lr=0.1, n_iter=10, batch_size=100, n_gib
                 input = k == 1 ? batch : mh_at_layer(dbn, batch, k-1)
                 fit_batch!(dbn[k], input, buf=w_buf, n_gibbs=n_gibbs)
             end
+            # There are some serious memory issues in the batches loop
+            # cause we never free any memory between loops
+            gc()
         end
     end
 end

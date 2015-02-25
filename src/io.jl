@@ -4,14 +4,14 @@ using HDF5
 
 function save_params(file::HDF5File, rbm::RBM, name::String)
     write(file, "$(name)___weight", rbm.W')
-    write(file, "$(name)___vbias", rbm.vbias)
-    write(file, "$(name)___bias", rbm.hbias)
+    write(file, "$(name)___vbias", rbm.visible.bias)
+    write(file, "$(name)___hbias", rbm.hidden.bias)
 end
 
 function load_params(file::HDF5File, rbm::RBM, name::String)
     rbm.W = read(file, "$(name)___weight")'
-    rbm.vbias = read(file, "$(name)___vbias")
-    rbm.hbias = read(file, "$(name)___bias")
+    rbm.visible.bias = read(file, "$(name)___vbias")
+    rbm.hidden.bias = read(file, "$(name)___hbias")
 end
 
 function save_params(file::HDF5File, dbn::DBN)

@@ -1,5 +1,6 @@
 
 using Distributions
+using ArrayViews
 using Base.LinAlg.BLAS
 
 import Base.length
@@ -112,22 +113,26 @@ function free_energy(rbm::RBM, vis::Mat{Float64})
     return - vb - Wx_b_log
 end
 
+# This function is very memory intensive. Force subsampling of the input
+# space with vectors should allow people to trade of itereations of memory consumption
+function score_samples(rbm::RBM, X::Mat{Float64}, scoring_ratio)
+    # Randomly select the scoring sample view
+    sample_size = int(size(X, 2) * scoring_ratio)
+    start = rand(1:size(X,2)-sample_size)
+    vis = view(X, :, start:start+sample_size)
 
-function score_samples(rbm::RBM, vis::Mat{Float64}; sample_size=10000)
-    if issparse(vis)
-        # sparse matrices may be infeasible for this operation
-        # so using only little sample
-        cols = sample(1:size(vis, 2), sample_size)
-        vis = full(vis[:, cols])
-    end
+    # Still have to do a copy
     n_feat, n_samples = size(vis)
     vis_corrupted = copy(vis)
     idxs = rand(1:n_feat, n_samples)
     for (i, j) in zip(idxs, 1:n_samples)
         vis_corrupted[i, j] = 1 - vis_corrupted[i, j]
     end
+
+    # These are expensive, but necessary for now.
     fe = free_energy(rbm, vis)
     fe_corrupted = free_energy(rbm, vis_corrupted)
+
     return n_feat * log(logistic(fe_corrupted - fe))
 end
 
@@ -180,22 +185,23 @@ end
 
 
 function fit(rbm::RBM, X::Mat{Float64};
-             persistent=true, lr=0.1, n_iter=10, batch_size=100, n_gibbs=1)
+             persistent=true, lr=0.1, n_iter=10, batch_size=100, n_gibbs=1, scoring_ratio=0.1)
     @assert minimum(X) >= 0 && maximum(X) <= 1
     n_samples = size(X, 2)
     n_batches = int(ceil(n_samples / batch_size))
     w_buf = zeros(size(rbm.W))
+    batch = Array(Float64, size(X, 1), batch_size)  # pre-allocate batch
     for itr=1:n_iter
         tic()
         for i=1:n_batches
             # println("fitting $(i)th batch")
-            batch = X[:, ((i-1)*batch_size + 1):min(i*batch_size, end)]
+            batch = X[:, ((i-1)*batch_size + 1):min(i*batch_size, size(X, 2))]
             batch = full(batch)
             fit_batch!(rbm, batch, persistent=persistent,
                        buf=w_buf, n_gibbs=n_gibbs)
         end
         toc()
-        pseudo_likelihood = mean(score_samples(rbm, X))
+        pseudo_likelihood = mean(score_samples(rbm, X, scoring_ratio))
         info("Iteration #$itr, pseudo-likelihood = $pseudo_likelihood")
     end
     return rbm
