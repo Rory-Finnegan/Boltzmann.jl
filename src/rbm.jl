@@ -11,7 +11,9 @@ abstract RBM
 typealias Mat{T} AbstractArray{T, 2}
 typealias Vec{T} AbstractArray{T, 1}
 
+
 const UNIT_CLASSES = [:bernoulli, :gaussian]
+
 
 type Units
     bias::Vector{Float64}
@@ -22,9 +24,18 @@ type Units
         new(zeros(num), class)
     end
 
+    function Units(params::Dict)
+        @assert haskey(params, "num")
+        if haskey(params, "class")
+            return new(zeros(params["num"]), symbol(params["class"]))
+        else
+            return new(zeros(params["num"]), :bernoulli)
+        end
+    end
+
     function Base.show(io::IO, units::Units)
-        num = size(units)
-        print(io, "Units(class=$(units.class), size=$num)")
+        num = length(units)
+        print(io, "Units(class=$(units.class), num=$num)")
     end
 end
 
@@ -40,16 +51,47 @@ type BaseRBM <: RBM
     dW_prev::Matrix{Float64}
     persistent_chain::Matrix{Float64}
     momentum::Float64
+    directory
 
-    function BaseRBM(visible::Units, hidden::Units; sigma=0.001, momentum=0.9)
+    function BaseRBM(visible::Units, hidden::Units; sigma=0.001, momentum=0.9, directory="./")
         n_hid = length(hidden)
         n_vis = length(visible)
 
-        new(rand(Normal(0, sigma), (n_hid, n_vis)),
+        new(
+            rand(Normal(0, sigma), (n_hid, n_vis)),
             visible, hidden,
             zeros(n_hid, n_vis),
             Array(Float64, 0, 0),
-            momentum)
+            momentum,
+            directory
+        )
+    end
+
+    function BaseRBM(params::Dict)
+        @assert haskey(params, "visible")
+        @assert haskey(params, "hidden")
+
+        visible = Units(params["visible"])
+        hidden = Units(params["hidden"])
+        sigma = 0.001
+        momentum = 0.9
+        directory="./"
+
+        sigma = haskey(params, "sigma") ? params["sigma"] : sigma
+        momentum = haskey(params, "momentum") ? params["momentum"] : momentum
+        directory = haskey(params, "directory") ? params["directory"] : directory
+
+        n_vis = length(visible)
+        n_hid = length(hidden)
+
+        new(
+            rand(Normal(0, sigma), (n_hid, n_vis)),
+            visible, hidden,
+            zeros(n_hid, n_vis),
+            Array(Float64, 0, 0),
+            momentum,
+            directory
+        )
     end
 
     function Base.show(io::IO, rbm::BaseRBM)
